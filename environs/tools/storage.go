@@ -19,8 +19,8 @@ var ErrNoTools = errors.New("no tools available")
 
 const (
 	toolPrefix        = "tools/%s/juju-"
-	unixToolSuffix    = ".tgz"
-	windowsToolSuffix = ".zip"
+	unixToolSuffix    = "." + coretools.Tgz
+	windowsToolSuffix = "." + coretools.Zip
 
 	// len(unixToolSuffix) == len(windowsToolSuffix) == 4
 	// 4 is used because it yields simpler logic in the code while
@@ -30,11 +30,8 @@ const (
 
 // StorageName returns the name that is used to store and retrieve the
 // given version of the juju tools.
-func StorageName(vers version.Binary, stream string) string {
-	if coretools.UseZipToolsWindows(vers) {
-		return storagePrefix(stream) + vers.String() + windowsToolSuffix
-	}
-	return storagePrefix(stream) + vers.String() + unixToolSuffix
+func StorageName(vers version.Binary, stream string, fileType string) string {
+	return storagePrefix(stream) + vers.String() + fileType
 }
 
 func storagePrefix(stream string) string {
@@ -79,6 +76,17 @@ func ReadList(stor storage.StorageReader, toolsDir string, majorVersion, minorVe
 		// If specified minor version value supplied, minor version must match.
 		if minorVersion >= 0 && t.Version.Minor != minorVersion {
 			continue
+		}
+		// TODO(ZIP): 2 warts here
+		// 1. We could use mime types for reliable detection but we have to read
+		// the tools
+		// 2. If it's not problem switching from .tar.gz to .tgz in the filetype would help
+		// currently the metadata uses ".tar.gz" in the filetype for no particular reason
+		// as far as I can tell
+		if strings.HasSuffix(name, unixToolSuffix) {
+			t.FileType = coretools.Tgz
+		} else if strings.HasSuffix(name, windowsToolSuffix) {
+			t.FileType = coretools.Zip
 		}
 		logger.Debugf("found %s", vers)
 		if t.URL, err = stor.URL(name); err != nil {

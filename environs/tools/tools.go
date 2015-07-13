@@ -140,10 +140,11 @@ func FindToolsForCloud(sources []simplestreams.DataSource, cloudSpec simplestrea
 			return nil, errors.Trace(err)
 		}
 		list[i] = &coretools.Tools{
-			Version: binary,
-			URL:     metadata.FullPath,
-			Size:    metadata.Size,
-			SHA256:  metadata.SHA256,
+			Version:  binary,
+			URL:      metadata.FullPath,
+			Size:     metadata.Size,
+			SHA256:   metadata.SHA256,
+			FileType: metadata.FileType,
 		}
 	}
 	if filter.Series != "" {

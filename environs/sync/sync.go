@@ -178,7 +178,7 @@ func copyTools(toolsDir, stream string, tools []*coretools.Tools, u ToolsUploade
 
 // copyOneToolsPackage copies one tool from the source to the target.
 func copyOneToolsPackage(toolsDir, stream string, tools *coretools.Tools, u ToolsUploader) error {
-	toolsName := envtools.StorageName(tools.Version, toolsDir)
+	toolsName := envtools.StorageName(tools.Version, toolsDir, tools.FileType)
 	logger.Infof("downloading %q %v (%v)", stream, toolsName, tools.URL)
 	resp, err := utils.GetValidatingHTTPClient().Get(tools.URL)
 	if err != nil {
@@ -232,12 +232,13 @@ func cloneToolsForSeries(toolsInfo *BuiltTools, stream string, series ...string)
 	// Copy the tools to the target storage, recording a Tools struct for each one.
 	var targetTools coretools.List
 	targetTools = append(targetTools, &coretools.Tools{
-		Version: toolsInfo.Version,
-		Size:    toolsInfo.Size,
-		SHA256:  toolsInfo.Sha256Hash,
+		Version:  toolsInfo.Version,
+		Size:     toolsInfo.Size,
+		SHA256:   toolsInfo.Sha256Hash,
+		FileType: toolsInfo.FileType,
 	})
 	putTools := func(vers version.Binary) (string, error) {
-		name := envtools.StorageName(vers, stream)
+		name := envtools.StorageName(vers, stream, toolsInfo.FileType)
 		src := filepath.Join(toolsInfo.Dir, toolsInfo.StorageName)
 		dest := filepath.Join(toolsInfo.Dir, name)
 		destDir := filepath.Dir(dest)
@@ -249,9 +250,10 @@ func cloneToolsForSeries(toolsInfo *BuiltTools, stream string, series ...string)
 		}
 		// Append to targetTools the attributes required to write out tools metadata.
 		targetTools = append(targetTools, &coretools.Tools{
-			Version: vers,
-			Size:    toolsInfo.Size,
-			SHA256:  toolsInfo.Sha256Hash,
+			Version:  vers,
+			Size:     toolsInfo.Size,
+			SHA256:   toolsInfo.Sha256Hash,
+			FileType: toolsInfo.FileType,
 		})
 		return name, nil
 	}
@@ -287,6 +289,7 @@ type BuiltTools struct {
 	StorageName string
 	Sha256Hash  string
 	Size        int64
+	FileType    string
 }
 
 // BuildToolsArchiveFunc is a function which can build a tools archive.
@@ -337,7 +340,10 @@ func buildToolsArchive(forceVersion *version.Number, stream string) (builtTools 
 	if err != nil {
 		return nil, err
 	}
-	storageName := envtools.StorageName(toolsVersion, stream)
+	// TODO(ZIP): once we start using zip files on windows in 1.26
+	// we'll want to also build zip files here, so this has to be changed
+	// when we land 1.26
+	storageName := envtools.StorageName(toolsVersion, stream, coretools.Tgz)
 	err = utils.CopyFile(filepath.Join(baseToolsDir, storageName), f.Name())
 	if err != nil {
 		return nil, err
@@ -348,6 +354,10 @@ func buildToolsArchive(forceVersion *version.Number, stream string) (builtTools 
 		StorageName: storageName,
 		Size:        size,
 		Sha256Hash:  sha256Hash,
+		// TODO(ZIP): once we start using zip files on windows in 1.26
+		// we'll want to also build zip files here, so this has to be changed
+		// when we land 1.26
+		FileType: coretools.Tgz,
 	}, nil
 }
 
@@ -375,10 +385,11 @@ func syncBuiltTools(stor storage.Storage, stream string, builtTools *BuiltTools,
 		return nil, err
 	}
 	return &coretools.Tools{
-		Version: builtTools.Version,
-		URL:     url,
-		Size:    builtTools.Size,
-		SHA256:  builtTools.Sha256Hash,
+		Version:  builtTools.Version,
+		URL:      url,
+		Size:     builtTools.Size,
+		SHA256:   builtTools.Sha256Hash,
+		FileType: buildTools.FileType,
 	}, nil
 }
 
@@ -402,7 +413,7 @@ type StorageToolsUploader struct {
 }
 
 func (u StorageToolsUploader) UploadTools(toolsDir, stream string, tools *coretools.Tools, data []byte) error {
-	toolsName := envtools.StorageName(tools.Version, toolsDir)
+	toolsName := envtools.StorageName(tools.Version, toolsDir, tools.FileType)
 	if err := u.Storage.Put(toolsName, bytes.NewReader(data), int64(len(data))); err != nil {
 		return err
 	}

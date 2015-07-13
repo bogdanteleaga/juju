@@ -917,11 +917,12 @@ func (c *Client) ResolveCharm(ref *charm.Reference) (*charm.URL, error) {
 }
 
 // UploadTools uploads tools at the specified location to the API server over HTTPS.
-func (c *Client) UploadTools(r io.Reader, vers version.Binary, additionalSeries ...string) (*tools.Tools, error) {
+func (c *Client) UploadTools(r io.Reader, vers version.Binary, fileType string, additionalSeries ...string) (*tools.Tools, error) {
 	// Prepare the upload request.
-	query := fmt.Sprintf("binaryVersion=%s&series=%s",
+	query := fmt.Sprintf("binaryVersion=%s&series=%s&fileType=%s",
 		vers,
 		strings.Join(additionalSeries, ","),
+		fileType,
 	)
 
 	endPoint, err := c.apiEndpoint("tools", query)
@@ -934,10 +935,11 @@ func (c *Client) UploadTools(r io.Reader, vers version.Binary, additionalSeries 
 		return nil, errors.Annotate(err, "cannot create upload request")
 	}
 	req.SetBasicAuth(c.st.tag, c.st.password)
-	if tools.UseZipToolsWindows(vers) {
-		req.Header.Set("Content-Type", "application/x-zip")
-	} else {
+	switch fileType {
+	case tools.Tgz:
 		req.Header.Set("Content-Type", "application/x-tar-gz")
+	case tools.Zip:
+		req.Header.Set("Content-Type", "application/zip")
 	}
 
 	// Send the request.

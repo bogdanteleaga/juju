@@ -25,6 +25,8 @@ import (
 
 // Archive writes the executable files found in the given directory in
 // archived format to w.
+// TODO(ZIP): do we just use the zip implementation here in 1.26?
+// And revert back to tar for 1.25?
 func Archive(w io.Writer, dir string, vers version.Binary) error {
 	if tools.UseZipToolsWindows(vers) {
 		return archiveZip(w, dir)

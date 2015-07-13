@@ -11,12 +11,20 @@ import (
 
 var logger = loggo.GetLogger("juju.tools")
 
+// These should be used as FileType in the struct below.
+// TODO(ZIP): consider making a separate type for them
+const (
+	Tgz = "tgz"
+	Zip = "zip"
+)
+
 // Tools represents the location and version of a tools tarball.
 type Tools struct {
-	Version version.Binary `json:"version"`
-	URL     string         `json:"url"`
-	SHA256  string         `json:"sha256,omitempty"`
-	Size    int64          `json:"size"`
+	Version  version.Binary `json:"version"`
+	URL      string         `json:"url"`
+	SHA256   string         `json:"sha256,omitempty"`
+	Size     int64          `json:"size"`
+	FileType string         `json:"filetype"`
 }
 
 // UseZipToolsWindows returns whether we should use zip tools on windows based on version.Binary.

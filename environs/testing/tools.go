@@ -128,11 +128,11 @@ func PrimeTools(c *gc.C, stor storage.Storage, dataDir, toolsDir string, vers ve
 	return agentTools
 }
 
-func uploadFakeToolsVersion(stor storage.Storage, toolsDir string, vers version.Binary) (*coretools.Tools, error) {
+func uploadFakeToolsVersion(stor storage.Storage, toolsDir string, vers version.Binary, fileType string) (*coretools.Tools, error) {
 	logger.Infof("uploading FAKE tools %s", vers)
 	tgz, checksum := makeFakeTools(vers)
 	size := int64(len(tgz))
-	name := envtools.StorageName(vers, toolsDir)
+	name := envtools.StorageName(vers, toolsDir, fileType)
 	if err := stor.Put(name, bytes.NewReader(tgz), size); err != nil {
 		return nil, err
 	}
@@ -140,7 +140,7 @@ func uploadFakeToolsVersion(stor storage.Storage, toolsDir string, vers version.
 	if err != nil {
 		return nil, err
 	}
-	return &coretools.Tools{URL: url, Version: vers, Size: size, SHA256: checksum}, nil
+	return &coretools.Tools{URL: url, Version: vers, Size: size, SHA256: checksum, FileType: fileType}, nil
 }
 
 // InstallFakeDownloadedTools creates and unpacks fake tools of the
@@ -157,7 +157,8 @@ func InstallFakeDownloadedTools(c *gc.C, dataDir string, vers version.Binary) *c
 	return agentTools
 }
 
-func makeFakeTools(vers version.Binary) ([]byte, string) {
+func makeFakeTools(vers version.Binary, fileType string) ([]byte, string) {
+	// TODO(ZIP): use zip files for testing
 	return coretesting.TarGz(
 		coretesting.NewTarFile(names.Jujud, 0777, "jujud contents "+vers.String()))
 }
@@ -175,7 +176,8 @@ func UploadFakeToolsVersions(stor storage.Storage, toolsDir, stream string, vers
 		if tools, ok := existingTools[version]; ok {
 			agentTools[i] = tools
 		} else {
-			t, err := uploadFakeToolsVersion(stor, toolsDir, version)
+			// TODO(ZIP): Pack fileType in here and send it along the version
+			t, err := uploadFakeToolsVersion(stor, toolsDir, version, coretools.Tgz)
 			if err != nil {
 				return nil, err
 			}
@@ -214,6 +216,9 @@ func MustUploadFakeToolsVersions(stor storage.Storage, stream string, versions .
 	return agentTools
 }
 
+// TODO(ZIP): uploadFakeTools will upload fake tools for Lts's and current version
+// On windows when we will change to zip in 1.26 we need to change these tests
+// to use zip files
 func uploadFakeTools(stor storage.Storage, toolsDir, stream string) error {
 	toolsSeries := set.NewStrings(toolsLtsSeries...)
 	toolsSeries.Add(version.Current.Series)

@@ -165,6 +165,7 @@ func Bootstrap(ctx environs.BootstrapContext, environ environs.Environ, args Boo
 		selectedTools.URL = fmt.Sprintf("file://%s", filename)
 		selectedTools.Size = builtTools.Size
 		selectedTools.SHA256 = builtTools.Sha256Hash
+		selectedTools.FileType = builtTools.FileType
 	}
 
 	ctx.Infof("Installing Juju agent on bootstrap instance")

@@ -102,10 +102,11 @@ func UnpackTools(dataDir string, tools *coretools.Tools, r io.Reader) (err error
 	}
 	defer removeAll(dir)
 
-	if coretools.UseZipToolsWindows(tools.Version) {
-		err = unpackZipTools(dir, tools, r)
-	} else {
+	switch tools.FileType {
+	case coretools.Tgz:
 		err = unpackTarTools(dir, tools, r)
+	case coretools.Zip:
+		err = unpackZipTools(dir, tools, r)
 	}
 	if err != nil {
 		return errors.Annotate(err, "could not unarchive tools")

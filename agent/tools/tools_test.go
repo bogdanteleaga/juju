@@ -87,6 +87,8 @@ func (t *ToolsSuite) TestUnpackToolsBadData(c *gc.C) {
 			Version: version.MustParseBinary("1.2.3-quantal-amd64"),
 			Size:    int64(len(test.data)),
 			SHA256:  test.checksum,
+			// TODO(ZIP): add test cases for zip here
+			FileType: coretest.Tgz,
 		}
 		err := agenttools.UnpackTools(t.dataDir, testTools, bytes.NewReader(test.data))
 		c.Assert(err, gc.ErrorMatches, test.err)
@@ -101,6 +103,8 @@ func (t *ToolsSuite) TestUnpackToolsBadChecksum(c *gc.C) {
 		Version: version.MustParseBinary("1.2.3-quantal-amd64"),
 		Size:    int64(len(data)),
 		SHA256:  "1234",
+		// TODO(ZIP): add test cases for zip here
+		FileType: coretest.Tgz,
 	}
 	err := agenttools.UnpackTools(t.dataDir, testTools, bytes.NewReader(data))
 	c.Assert(err, gc.ErrorMatches, "could not unarchive tools: could not extract .tar out of .tar.gz: tarball sha256 mismatch, expected 1234, got .*")
@@ -121,6 +125,8 @@ func (t *ToolsSuite) TestUnpackToolsContents(c *gc.C) {
 		Version: version.MustParseBinary("1.2.3-quantal-amd64"),
 		Size:    int64(len(data)),
 		SHA256:  checksum,
+		// TODO(ZIP): add test cases for zip here
+		FileType: coretest.Tgz,
 	}
 
 	err := agenttools.UnpackTools(t.dataDir, testTools, bytes.NewReader(data))
@@ -140,6 +146,8 @@ func (t *ToolsSuite) TestUnpackToolsContents(c *gc.C) {
 		Version: version.MustParseBinary("1.2.3-quantal-amd64"),
 		Size:    int64(len(data2)),
 		SHA256:  checksum2,
+		// TODO(ZIP): add test cases for zip here
+		FileType: coretest.Tgz,
 	}
 	err = agenttools.UnpackTools(t.dataDir, tools2, bytes.NewReader(data2))
 	c.Assert(err, jc.ErrorIsNil)
@@ -176,6 +184,8 @@ func (t *ToolsSuite) TestChangeAgentTools(c *gc.C) {
 		Version: version.MustParseBinary("1.2.3-quantal-amd64"),
 		Size:    int64(len(data)),
 		SHA256:  checksum,
+		// TODO(ZIP): add test cases for zip here
+		FileType: coretest.Tgz,
 	}
 	err := agenttools.UnpackTools(t.dataDir, testTools, bytes.NewReader(data))
 	c.Assert(err, jc.ErrorIsNil)
@@ -198,6 +208,8 @@ func (t *ToolsSuite) TestChangeAgentTools(c *gc.C) {
 		Version: version.MustParseBinary("1.2.4-quantal-amd64"),
 		Size:    int64(len(data2)),
 		SHA256:  checksum2,
+		// TODO(ZIP): add test cases for zip here
+		FileType: coretest.Tgz,
 	}
 	err = agenttools.UnpackTools(t.dataDir, tools2, bytes.NewReader(data2))
 	c.Assert(err, jc.ErrorIsNil)

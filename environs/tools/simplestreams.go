@@ -318,20 +318,18 @@ type MetadataFile struct {
 func MetadataFromTools(toolsList coretools.List, toolsDir string) []*ToolsMetadata {
 	metadata := make([]*ToolsMetadata, len(toolsList))
 	for i, t := range toolsList {
+		path = fmt.Sprintf("%s/juju-%s-%s-%s.%s", toolsDir, t.Version.Number, t.Version.Series, t.Version.Arch, t.FileType)
 		var fileType, path string
-		if coretools.UseZipToolsWindows(t.Version) {
-			fileType = "zip"
-			path = fmt.Sprintf("%s/juju-%s-%s-%s.%s", toolsDir, t.Version.Number, t.Version.Series, t.Version.Arch, fileType)
-		} else {
-			fileType = "tar.gz"
-			path = fmt.Sprintf("%s/juju-%s-%s-%s.tgz", toolsDir, t.Version.Number, t.Version.Series, t.Version.Arch)
-		}
 		metadata[i] = &ToolsMetadata{
-			Release:  t.Version.Series,
-			Version:  t.Version.Number.String(),
-			Arch:     t.Version.Arch,
-			Path:     path,
-			FileType: fileType,
+			Release: t.Version.Series,
+			Version: t.Version.Number.String(),
+			Arch:    t.Version.Arch,
+			Path:    path,
+			// TODO(ZIP): before FileType was "tar.gz", while the archive had
+			// "tgz" as an extension. I chose "tgz" here defined in /tools/tools.go
+			// Does that work? I don't see why we can't accomodate the metadata to
+			// match the file extensions
+			FileType: t.FileType,
 			Size:     t.Size,
 			SHA256:   t.SHA256,
 		}

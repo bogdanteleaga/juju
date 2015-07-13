@@ -211,11 +211,12 @@ func (h *toolsDownloadHandler) fetchAndCacheTools(v version.Binary, stor toolsto
 }
 
 // sendTools streams the tools tarball to the client.
-func (h *toolsDownloadHandler) sendTools(w http.ResponseWriter, statusCode int, tarball []byte, vers version.Binary) {
-	if tools.UseZipToolsWindows(vers) {
-		w.Header().Set("Content-Type", "application/x-zip")
-	} else {
+func (h *toolsDownloadHandler) sendTools(w http.ResponseWriter, statusCode int, tarball []byte, vers version.Binary, fileType string) {
+	switch fileType {
+	case tools.Tgz:
 		w.Header().Set("Content-Type", "application/x-tar-gz")
+	case tools.Zip:
+		w.Header().Set("Content-Type", "application/zip")
 	}
 	w.Header().Set("Content-Length", fmt.Sprint(len(tarball)))
 	w.WriteHeader(statusCode)
@@ -238,15 +239,21 @@ func (h *toolsUploadHandler) processPost(r *http.Request, st *state.State) (*too
 		return nil, errors.Annotatef(err, "invalid tools version %q", binaryVersionParam)
 	}
 
+	fileType := query.Get("fileType")
+	if fileType == "" {
+		return nil, errors.New("expected fileType argument")
+	}
+
 	// Make sure the content type is correct.
 	contentType := r.Header.Get("Content-Type")
-	if tools.UseZipToolsWindows(toolsVersion) {
-		if contentType != "application/x-zip" {
-			return nil, errors.Errorf("expected Content-Type: application/x-zip, got: %v", contentType)
-		}
-	} else {
+	switch fileType {
+	case tools.Tgz:
 		if contentType != "application/x-tar-gz" {
 			return nil, errors.Errorf("expected Content-Type: application/x-tar-gz, got: %v", contentType)
+		}
+	case tools.Zip:
+		if contentType != "application/x-zip" {
+			return nil, errors.Errorf("expected Content-Type: application/x-zip, got: %v", contentType)
 		}
 	}
 
