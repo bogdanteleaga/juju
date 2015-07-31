@@ -1,6 +1,7 @@
 #
 # Makefile for juju-core.
-#
+# 
+# just a comment
 
 ifndef GOPATH
 $(warning You need to set up a GOPATH.  See the README file.)
