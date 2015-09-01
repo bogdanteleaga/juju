@@ -72,7 +72,7 @@ func (s *UpgradeSuite) setAptCmds(cmd *exec.Cmd) {
 	}
 }
 
-func (s *UpgradeSuite) getAptCmds() []*exec.Cmd {
+func (s *UpgradeSuite) getInstallCmds() []*exec.Cmd {
 	s.aptMutex.Lock()
 	defer s.aptMutex.Unlock()
 	return s.aptCmds
@@ -802,11 +802,16 @@ func (s *UpgradeSuite) keyFile() string {
 
 func (s *UpgradeSuite) assertCommonUpgrades(c *gc.C) {
 	// rsyslog-gnutls should have been installed.
-	cmds := s.getAptCmds()
+	cmds := s.getInstallCmds()
 	c.Assert(cmds, gc.HasLen, 1)
 	args := cmds[0].Args
 	c.Assert(len(args), jc.GreaterThan, 1)
-	c.Assert(args[0], gc.Equals, "apt-get")
+
+	pm, err := coretesting.GetPackageManager()
+	c.Assert(err, jc.ErrorIsNil)
+
+	c.Assert(args[0], gc.Equals, pm.PackageManager)
+
 	c.Assert(args[len(args)-1], gc.Equals, "rsyslog-gnutls")
 }
 
@@ -912,7 +917,7 @@ func (s *UpgradeSuite) attemptRestrictedAPIAsUser(c *gc.C, conf agent.Config) er
 	defer apiState.Close()
 
 	// this call should always work
-	var result api.Status
+	var result params.FullStatus
 	err = apiState.APICall("Client", 0, "", "FullStatus", nil, &result)
 	c.Assert(err, jc.ErrorIsNil)
 
@@ -1001,7 +1006,7 @@ type MachineStatusCall struct {
 	Info   string
 }
 
-func (a *fakeUpgradingMachineAgent) setMachineStatus(_ *api.State, status params.Status, info string) error {
+func (a *fakeUpgradingMachineAgent) setMachineStatus(_ api.Connection, status params.Status, info string) error {
 	// Record setMachineStatus calls for later inspection.
 	a.MachineStatusCalls = append(a.MachineStatusCalls, MachineStatusCall{status, info})
 	return nil

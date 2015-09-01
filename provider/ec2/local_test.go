@@ -8,6 +8,7 @@ import (
 	"net"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/juju/errors"
@@ -56,7 +57,7 @@ var localConfigAttrs = coretesting.FakeConfig().Merge(coretesting.Attrs{
 	"control-bucket": "test-bucket",
 	"access-key":     "x",
 	"secret-key":     "x",
-	"agent-version":  version.Current.Number.String(),
+	"agent-version":  coretesting.FakeVersionNumber.String(),
 })
 
 func registerLocalTests() {
@@ -139,6 +140,7 @@ func (srv *localServer) startServer(c *gc.C) {
 	zones[2].Name = "test-unavailable"
 	zones[2].State = "unavailable"
 	srv.ec2srv.SetAvailabilityZones(zones)
+	srv.ec2srv.SetInitialInstanceState(ec2test.Pending)
 }
 
 // addSpice adds some "spice" to the local server
@@ -191,15 +193,15 @@ func (t *localServerSuite) TearDownSuite(c *gc.C) {
 }
 
 func (t *localServerSuite) SetUpTest(c *gc.C) {
+	t.PatchValue(&version.Current, version.Binary{
+		Number: coretesting.FakeVersionNumber,
+		Series: coretesting.FakeDefaultSeries,
+		Arch:   arch.AMD64,
+	})
 	t.BaseSuite.SetUpTest(c)
 	t.SetFeatureFlags(feature.AddressAllocation)
 	t.srv.startServer(c)
 	t.Tests.SetUpTest(c)
-	t.PatchValue(&version.Current, version.Binary{
-		Number: version.Current.Number,
-		Series: coretesting.FakeDefaultSeries,
-		Arch:   arch.AMD64,
-	})
 }
 
 func (t *localServerSuite) TearDownTest(c *gc.C) {
@@ -548,6 +550,68 @@ func (t *localServerSuite) testStartInstanceAvailZoneAllConstrained(c *gc.C, run
 	c.Assert(azArgs, gc.DeepEquals, []string{"az1", "az2"})
 }
 
+func (t *localServerSuite) bootstrapAndStartWithParams(c *gc.C, params environs.StartInstanceParams) error {
+	env := t.Prepare(c)
+	err := bootstrap.Bootstrap(envtesting.BootstrapContext(c), env, bootstrap.BootstrapParams{})
+	c.Assert(err, jc.ErrorIsNil)
+	_, err = testing.StartInstanceWithParams(env, "1", params, nil)
+	return err
+}
+
+func (t *localServerSuite) TestSpaceConstraintsSpaceNotInPlacementZone(c *gc.C) {
+	err := t.bootstrapAndStartWithParams(c, environs.StartInstanceParams{
+		Placement:   "zone=test-available",
+		Constraints: constraints.MustParse("spaces=aaaaaaaaaa"),
+		SubnetsToZones: map[network.Id][]string{
+			"subnet-2": []string{"zone2"},
+			"subnet-3": []string{"zone3"},
+		},
+	})
+
+	// Expect an error because zone test-available isn't in SubnetsToZones
+	c.Assert(err, gc.ErrorMatches, `unable to resolve constraints: space and/or subnet unavailable in zones \[test-available\]`)
+}
+
+func (t *localServerSuite) TestSpaceConstraintsSpaceInPlacementZone(c *gc.C) {
+	err := t.bootstrapAndStartWithParams(c, environs.StartInstanceParams{
+		Placement:   "zone=test-available",
+		Constraints: constraints.MustParse("spaces=aaaaaaaaaa"),
+		SubnetsToZones: map[network.Id][]string{
+			"subnet-2": []string{"test-available"},
+			"subnet-3": []string{"zone3"},
+		},
+	})
+
+	// Should work - test-available is in SubnetsToZones
+	c.Assert(err, jc.ErrorIsNil)
+}
+
+func (t *localServerSuite) TestSpaceConstraintsNoPlacement(c *gc.C) {
+	err := t.bootstrapAndStartWithParams(c, environs.StartInstanceParams{
+		Constraints: constraints.MustParse("spaces=aaaaaaaaaa"),
+		SubnetsToZones: map[network.Id][]string{
+			"subnet-2": []string{"test-available"},
+			"subnet-3": []string{"zone3"},
+		},
+	})
+
+	// Shoule work because zone is not specified so we can resolve the constraints
+	c.Assert(err, jc.ErrorIsNil)
+}
+
+func (t *localServerSuite) TestSpaceConstraintsNoAvailableSubnets(c *gc.C) {
+	err := t.bootstrapAndStartWithParams(c, environs.StartInstanceParams{
+		Constraints: constraints.MustParse("spaces=aaaaaaaaaa"),
+		SubnetsToZones: map[network.Id][]string{
+			"subnet-2": []string{""},
+		},
+	})
+
+	// We requested a space, but there are no subnets in SubnetsToZones, so we can't resolve
+	// the constraints
+	c.Assert(err, gc.ErrorMatches, `unable to resolve constraints: space and/or subnet unavailable in zones \[test-available\]`)
+}
+
 func (t *localServerSuite) TestStartInstanceAvailZoneOneConstrained(c *gc.C) {
 	t.testStartInstanceAvailZoneOneConstrained(c, azConstrainedErr)
 }
@@ -751,10 +815,9 @@ func (t *localServerSuite) TestAllocateAddressFailureToFindNetworkInterface(c *g
 }
 
 func (t *localServerSuite) setUpInstanceWithDefaultVpc(c *gc.C) (environs.NetworkingEnviron, instance.Id) {
-	// setting a default-vpc will create a network interface
-	t.srv.ec2srv.SetInitialAttributes(map[string][]string{
-		"default-vpc": {"vpc-xxxxxxx"},
-	})
+	// Simulate a default VPC exists.
+	t.srv.ec2srv.AddDefaultVPCAndSubnets()
+
 	env := t.prepareEnviron(c)
 	err := bootstrap.Bootstrap(envtesting.BootstrapContext(c), env, bootstrap.BootstrapParams{})
 	c.Assert(err, jc.ErrorIsNil)
@@ -840,44 +903,94 @@ func (t *localServerSuite) TestNetworkInterfaces(c *gc.C) {
 	env, instId := t.setUpInstanceWithDefaultVpc(c)
 	interfaces, err := env.NetworkInterfaces(instId)
 	c.Assert(err, jc.ErrorIsNil)
+
+	// The CIDR isn't predictable, but it is in the 10.10.x.0/24 format
+	// The subnet ID is in the form "subnet-x", where x matches the same
+	// number from the CIDR. The interfaces address is part of the CIDR.
+	// For these reasons we check that the CIDR is in the expected format
+	// and derive the expected values for ProviderSubnetId and Address.
+	c.Assert(interfaces, gc.HasLen, 1)
+	cidr := interfaces[0].CIDR
+	re := regexp.MustCompile(`10\.10\.(\d+)\.0/24`)
+	c.Assert(re.Match([]byte(cidr)), jc.IsTrue)
+	index := re.FindStringSubmatch(cidr)[1]
+	addr := fmt.Sprintf("10.10.%s.5", index)
+	subnetId := network.Id("subnet-" + index)
+
 	expectedInterfaces := []network.InterfaceInfo{{
 		DeviceIndex:      0,
 		MACAddress:       "20:01:60:cb:27:37",
-		CIDR:             "10.10.0.0/20",
+		CIDR:             cidr,
 		ProviderId:       "eni-0",
-		ProviderSubnetId: "subnet-0",
+		ProviderSubnetId: subnetId,
 		VLANTag:          0,
 		InterfaceName:    "unsupported0",
 		Disabled:         false,
 		NoAutoStart:      false,
 		ConfigType:       network.ConfigDHCP,
-		Address:          network.NewScopedAddress("10.10.0.5", network.ScopeCloudLocal),
+		Address:          network.NewScopedAddress(addr, network.ScopeCloudLocal),
 	}}
 	c.Assert(interfaces, jc.DeepEquals, expectedInterfaces)
+}
+
+func validateSubnets(c *gc.C, subnets []network.SubnetInfo) {
+	// These are defined in the test server for the testing default
+	// VPC.
+	defaultSubnets := []network.SubnetInfo{{
+		CIDR:              "10.10.0.0/24",
+		ProviderId:        "subnet-0",
+		VLANTag:           0,
+		AllocatableIPLow:  net.ParseIP("10.10.0.4").To4(),
+		AllocatableIPHigh: net.ParseIP("10.10.0.254").To4(),
+		AvailabilityZones: []string{"test-available"},
+	}, {
+		CIDR:              "10.10.1.0/24",
+		ProviderId:        "subnet-1",
+		VLANTag:           0,
+		AllocatableIPLow:  net.ParseIP("10.10.1.4").To4(),
+		AllocatableIPHigh: net.ParseIP("10.10.1.254").To4(),
+		AvailabilityZones: []string{"test-impaired"},
+	}, {
+		CIDR:              "10.10.2.0/24",
+		ProviderId:        "subnet-2",
+		VLANTag:           0,
+		AllocatableIPLow:  net.ParseIP("10.10.2.4").To4(),
+		AllocatableIPHigh: net.ParseIP("10.10.2.254").To4(),
+		AvailabilityZones: []string{"test-unavailable"},
+	}}
+
+	for _, subnet := range subnets {
+		// We can find the expected data by looking at the CIDR.
+		// subnets isn't in a predictable order due to the use of maps.
+		re := regexp.MustCompile(`10\.10\.(\d+)\.0/24`)
+		c.Assert(re.Match([]byte(subnet.CIDR)), jc.IsTrue)
+		index, err := strconv.Atoi(re.FindStringSubmatch(subnet.CIDR)[1])
+		c.Assert(err, jc.ErrorIsNil)
+		// Don't know which AZ the subnet will end up in.
+		defaultSubnets[index].AvailabilityZones = subnet.AvailabilityZones
+		c.Assert(subnet, jc.DeepEquals, defaultSubnets[index])
+	}
 }
 
 func (t *localServerSuite) TestSubnets(c *gc.C) {
 	env, _ := t.setUpInstanceWithDefaultVpc(c)
 
-	subnets, err := env.Subnets("", []network.Id{"subnet-0"})
+	subnets, err := env.Subnets(instance.UnknownId, []network.Id{"subnet-0"})
 	c.Assert(err, jc.ErrorIsNil)
+	c.Assert(subnets, gc.HasLen, 1)
+	validateSubnets(c, subnets)
 
-	defaultSubnets := []network.SubnetInfo{{
-		// this is defined in the test server for the default-vpc
-		CIDR:              "10.10.0.0/20",
-		ProviderId:        "subnet-0",
-		VLANTag:           0,
-		AllocatableIPLow:  net.ParseIP("10.10.0.4").To4(),
-		AllocatableIPHigh: net.ParseIP("10.10.15.254").To4(),
-	}}
-	c.Assert(subnets, jc.DeepEquals, defaultSubnets)
+	subnets, err = env.Subnets(instance.UnknownId, nil)
+	c.Assert(err, jc.ErrorIsNil)
+	c.Assert(subnets, gc.HasLen, 3)
+	validateSubnets(c, subnets)
 }
 
-func (t *localServerSuite) TestSubnetsNoNetIds(c *gc.C) {
+func (t *localServerSuite) TestSubnetsInstIdNotSupported(c *gc.C) {
 	env, _ := t.setUpInstanceWithDefaultVpc(c)
 
-	_, err := env.Subnets("", []network.Id{})
-	c.Assert(err, gc.ErrorMatches, "subnetIds must not be empty")
+	_, err := env.Subnets("foo", []network.Id{})
+	c.Assert(err, gc.ErrorMatches, "instId not supported")
 }
 
 func (t *localServerSuite) TestSubnetsMissingSubnet(c *gc.C) {
@@ -888,9 +1001,7 @@ func (t *localServerSuite) TestSubnetsMissingSubnet(c *gc.C) {
 }
 
 func (t *localServerSuite) TestSupportsAddressAllocationTrue(c *gc.C) {
-	t.srv.ec2srv.SetInitialAttributes(map[string][]string{
-		"default-vpc": {"vpc-xxxxxxx"},
-	})
+	t.srv.ec2srv.AddDefaultVPCAndSubnets()
 	env := t.prepareEnviron(c)
 	result, err := env.SupportsAddressAllocation("")
 	c.Assert(err, jc.ErrorIsNil)
@@ -923,7 +1034,7 @@ func (t *localServerSuite) TestReleaseAddressWithNoFeatureFlag(c *gc.C) {
 }
 
 func (t *localServerSuite) TestSupportsAddressAllocationCaches(c *gc.C) {
-	t.srv.ec2srv.SetInitialAttributes(map[string][]string{
+	t.srv.ec2srv.SetAccountAttributes(map[string][]string{
 		"default-vpc": {"none"},
 	})
 	env := t.prepareEnviron(c)
@@ -933,7 +1044,7 @@ func (t *localServerSuite) TestSupportsAddressAllocationCaches(c *gc.C) {
 
 	// this value won't change normally, the change here is to
 	// ensure that subsequent calls use the cached value
-	t.srv.ec2srv.SetInitialAttributes(map[string][]string{
+	t.srv.ec2srv.SetAccountAttributes(map[string][]string{
 		"default-vpc": {"vpc-xxxxxxx"},
 	})
 	result, err = env.SupportsAddressAllocation("")
@@ -942,7 +1053,7 @@ func (t *localServerSuite) TestSupportsAddressAllocationCaches(c *gc.C) {
 }
 
 func (t *localServerSuite) TestSupportsAddressAllocationFalse(c *gc.C) {
-	t.srv.ec2srv.SetInitialAttributes(map[string][]string{
+	t.srv.ec2srv.SetAccountAttributes(map[string][]string{
 		"default-vpc": {"none"},
 	})
 	env := t.prepareEnviron(c)
